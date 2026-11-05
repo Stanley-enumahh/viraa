@@ -236,9 +236,13 @@ def execute_send(sender, quote):
     )
 
 
-def has_balance(user, asset, amount):
+def balance_of(user, asset):
     wallet = Wallet.objects.filter(user=user, asset=asset).first()
-    return wallet is not None and wallet.balance >= amount
+    return wallet.balance if wallet else Decimal(0)
+
+
+def has_balance(user, asset, amount):
+    return balance_of(user, asset) >= amount
 
 
 def portfolio(user, at=None):
