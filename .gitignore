@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Local tooling and logs
+*.log
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
