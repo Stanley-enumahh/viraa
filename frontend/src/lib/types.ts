@@ -61,6 +61,16 @@ export type TradeQuote = {
   fee_amount: string;
 };
 
+export type TradeRequest = {
+  kind: TradeQuote["kind"];
+  from_asset: string;
+  to_asset: string;
+  amount: string;
+  amount_asset: string;
+};
+
+export type TradeEstimate = TradeQuote & { has_balance: boolean };
+
 export type SendQuote = {
   asset: string;
   amount: string;

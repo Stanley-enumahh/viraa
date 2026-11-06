@@ -58,6 +58,21 @@ export default function CoinPage() {
 
       {!(price.error && !price.data) && (
         <>
+          <div className="grid grid-cols-3 gap-2">
+            <Link
+              href={`/trade?kind=buy&asset=${symbol}`}
+              className="rounded-xl bg-accent px-4 py-2.5 text-center font-semibold text-on-accent"
+            >
+              Buy
+            </Link>
+            <Link href={`/trade?kind=sell&asset=${symbol}`} className="rounded-xl border border-line px-4 py-2.5 text-center font-medium">
+              Sell
+            </Link>
+            <Link href={`/trade?kind=swap&asset=${symbol}`} className="rounded-xl border border-line px-4 py-2.5 text-center font-medium">
+              Swap
+            </Link>
+          </div>
+
           <div role="group" aria-label="Chart range" className="flex gap-1">
             {RANGES.map((option) => (
               <button

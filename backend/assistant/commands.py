@@ -113,6 +113,18 @@ def _draft_reply(user, action, quote, summary, transcript):
     return Reply('draft', f'{summary} Tap approve to confirm.', draft=draft)
 
 
+def draft_manual_trade(user, kind, from_asset, to_asset, amount, amount_asset=None):
+    """A trade from the Trade page. It gets the same locked price and approval step as a voice request."""
+    quote = services.quote_trade(kind, from_asset, to_asset, amount, amount_asset)
+    if not services.has_balance(user, quote.from_asset, quote.from_amount):
+        have = services.balance_of(user, quote.from_asset)
+        raise WalletError(
+            'insufficient_funds',
+            f'You need {format_amount(quote.from_amount)} {quote.from_asset} but only have {format_amount(have)}.',
+        )
+    return drafts.create_draft(user, kind, quote, _trade_summary(quote), '')
+
+
 def _handle_trade(user, intent, transcript):
     verb = intent.action
     if not intent.from_asset or not intent.to_asset:

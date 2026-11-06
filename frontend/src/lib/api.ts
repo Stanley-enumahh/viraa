@@ -7,6 +7,8 @@ import type {
   Price,
   PriceHistory,
   PriceList,
+  TradeEstimate,
+  TradeRequest,
   Transaction,
   User,
 } from "./types";
@@ -187,6 +189,9 @@ export const api = {
     const response = await sendRequest("/assistant/speak/", { method: "POST", body: { text } });
     return response.blob();
   },
+  tradeEstimate: (trade: TradeRequest) =>
+    request<TradeEstimate>("/wallets/trades/quote/", { method: "POST", body: trade }),
+  createTradeDraft: (trade: TradeRequest) => request<Draft>("/assistant/drafts/", { method: "POST", body: trade }),
   draft: (reference: string) => request<Draft>(`/assistant/drafts/${reference}/`),
   approveDraft: (reference: string) =>
     request<{ reply: string; draft: Draft }>(`/assistant/drafts/${reference}/approve/`, { method: "POST" }),

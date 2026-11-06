@@ -125,6 +125,7 @@ Refused requests return HTTP 400 with a message that can be shown to the user:
 | POST | `/api/assistant/command/` | Send typed `text`; returns the same result |
 | POST | `/api/assistant/speak/` | Send `text`; returns MP3 audio of Vira's reply |
 | GET | `/api/assistant/drafts/` | Recent drafts |
+| POST | `/api/assistant/drafts/` | Lock the price for a buy, sell or swap from the Trade page; takes the same fields as a trade |
 | GET | `/api/assistant/drafts/<reference>/` | One draft |
 | POST | `/api/assistant/drafts/<reference>/approve/` | Execute a draft at its locked price |
 | POST | `/api/assistant/drafts/<reference>/reject/` | Cancel a draft |

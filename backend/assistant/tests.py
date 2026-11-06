@@ -399,6 +399,75 @@ class AssistantApiTests(APITestCase):
         self.assertEqual(codes, [200, 200, 429])
 
 
+class ManualTradeDraftTests(APITestCase):
+    def setUp(self):
+        self.ada, self.bola = make_user('ada'), make_user('bola')
+        self.client.force_authenticate(self.ada)
+
+    def create(self, **overrides):
+        data = {'kind': 'buy', 'from_asset': 'NGN', 'to_asset': 'BTC', 'amount': '20000', **overrides}
+        return self.client.post(reverse('draft-list'), data)
+
+    def test_requires_auth(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.create().status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_draft_moves_nothing_until_approved_at_the_locked_amounts(self):
+        with mock.patch('market.simulator.time.time', return_value=NOW):
+            response = self.create()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['status'], 'pending')
+        self.assertEqual(response.data['action'], 'buy')
+        self.assertEqual(balance_of(self.ada, 'NGN'), Decimal('500000'))
+        shown = Decimal(response.data['quote']['to_amount'])
+        btc_before = balance_of(self.ada, 'BTC')
+
+        with mock.patch('market.simulator.time.time', return_value=NOW + 30):
+            approved = self.client.post(reverse('draft-approve', args=[response.data['reference']]))
+
+        self.assertEqual(approved.status_code, status.HTTP_200_OK)
+        self.assertEqual(approved.data['draft']['status'], 'executed')
+        self.assertEqual(balance_of(self.ada, 'NGN'), Decimal('480000'))
+        self.assertEqual(balance_of(self.ada, 'BTC'), btc_before + shown)
+
+    def test_sell_and_swap(self):
+        sold = self.client.post(reverse('draft-approve', args=[
+            self.create(kind='sell', from_asset='SOL', to_asset='USDT', amount='1').data['reference'],
+        ]))
+        self.assertEqual(sold.status_code, status.HTTP_200_OK)
+        self.assertEqual(balance_of(self.ada, 'SOL'), Decimal('1'))
+
+        swapped = self.client.post(reverse('draft-approve', args=[
+            self.create(kind='swap', from_asset='ETH', to_asset='DOGE', amount='0.05').data['reference'],
+        ]))
+        self.assertEqual(swapped.status_code, status.HTTP_200_OK)
+        self.assertEqual(balance_of(self.ada, 'ETH'), Decimal('0.05'))
+        self.assertGreater(balance_of(self.ada, 'DOGE'), 0)
+
+    def test_amount_can_be_given_in_the_coin_received(self):
+        response = self.create(amount='0.001', amount_asset='BTC')
+        self.assertEqual(Decimal(response.data['quote']['to_amount']), Decimal('0.001'))
+
+    def test_refusals_create_no_draft(self):
+        cases = [
+            ('insufficient_funds', {'amount': '900000'}),
+            ('invalid_pair', {'kind': 'swap', 'from_asset': 'NGN'}),
+            ('unknown_asset', {'to_asset': 'NOPE'}),
+        ]
+        for code, overrides in cases:
+            with self.subTest(code=code):
+                response = self.create(**overrides)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data['code'], code)
+        self.assertEqual(self.create(amount='-5').status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Draft.objects.exists())
+
+    def test_new_trade_replaces_an_open_draft(self):
+        first = self.create().data['reference']
+        self.create(amount='1000')
+        self.assertEqual(Draft.objects.get(reference=first).status, 'rejected')
+
+
 class SpeakableTests(SimpleTestCase):
     def test_rewrites_amounts_and_assets_for_speech(self):
         cases = [

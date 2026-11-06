@@ -5,13 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { AssistantDock } from "@/components/assistant/assistant-dock";
-import { ActivityIcon, HomeIcon, LogoutIcon, MarketsIcon } from "@/components/icons";
+import { ActivityIcon, HomeIcon, LogoutIcon, MarketsIcon, SwapIcon } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { useAuth } from "@/lib/auth";
 
 const NAV_ITEMS: { href: string; label: string; icon: () => ReactNode }[] = [
   { href: "/dashboard", label: "Home", icon: HomeIcon },
   { href: "/markets", label: "Markets", icon: MarketsIcon },
+  { href: "/trade", label: "Trade", icon: SwapIcon },
   { href: "/activity", label: "Activity", icon: ActivityIcon },
 ];
 
@@ -78,7 +79,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-3 border-t border-line bg-canvas/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-4 border-t border-line bg-canvas/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href);
