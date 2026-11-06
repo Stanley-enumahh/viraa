@@ -17,11 +17,11 @@ from django.db import transaction
 from market import simulator
 
 from .models import Transaction, Wallet
+from .networks import ASSET_NETWORKS, network_name, normalize_network, spoken_list
 
 User = get_user_model()
 
 TRADE_FEE_RATE = Decimal('0.005')
-EXTERNAL_SEND_FEE_USD = Decimal('1')
 PAYMENT_ASSETS = {'NGN', 'USDT'}
 ADDRESS_PATTERN = re.compile(r'^[A-Za-z0-9]{16,64}$')
 
@@ -130,6 +130,7 @@ class SendQuote:
     fee_amount: Decimal
     recipient: User | None
     address: str
+    network: str = ''
 
     @property
     def total(self):
@@ -144,11 +145,36 @@ class SendQuote:
             'recipient': self.recipient.username if self.recipient else None,
             'recipient_name': self.recipient.full_name if self.recipient else None,
             'address': self.address or None,
+            'network': self.network or None,
+            'network_name': network_name(self.network) if self.network else None,
         }
 
 
-def quote_send(sender, asset, amount, recipient='', address='', at=None):
-    """Price a send to a Vira username (free) or an external address (flat fee)."""
+def network_fee(asset, network, at=None):
+    """The fee in the asset being sent, at the current price."""
+    return _round_up(network.fee_usd / simulator.price_usd(asset, at), asset)
+
+
+def choose_network(asset, requested):
+    """The network to send on. A coin with only one needs no choice; USDT does."""
+    available = ASSET_NETWORKS[asset]
+    code = normalize_network(requested)
+    if not code:
+        if len(available) == 1:
+            return available[0]
+        raise WalletError('network_required', f'Which network for {asset}: {spoken_list(available)}?')
+    for network in available:
+        if network.code == code:
+            return network
+    raise WalletError('invalid_network', f'{asset} can only be sent on {spoken_list(available)}.')
+
+
+def quote_send(sender, asset, amount, recipient='', address='', network='', at=None):
+    """Price a send to a Vira username or an external address.
+
+    Crypto goes on a chosen network, which sets the fee. Naira has no network and
+    only moves between Vira users, for free.
+    """
     asset = _clean_asset(asset)
     recipient = (recipient or '').strip().lstrip('@')
     address = (address or '').strip()
@@ -159,20 +185,23 @@ def quote_send(sender, asset, amount, recipient='', address='', at=None):
     if amount <= 0:
         raise WalletError('amount_too_small', 'That amount is too small to send.')
 
+    user = None
     if recipient:
         user = User.objects.filter(username__iexact=recipient).first()
         if user is None:
             raise WalletError('unknown_recipient', f"I can't find a Vira user called {recipient}.")
         if user.pk == sender.pk:
             raise WalletError('invalid_destination', "You can't send funds to yourself.")
-        return SendQuote(asset, amount, Decimal(0), user, '')
+    else:
+        if simulator.ASSETS[asset].is_fiat:
+            raise WalletError('invalid_destination', f'{asset} can only be sent to another Vira user.')
+        if not ADDRESS_PATTERN.match(address):
+            raise WalletError('invalid_destination', "That doesn't look like a valid address.")
 
     if simulator.ASSETS[asset].is_fiat:
-        raise WalletError('invalid_destination', f'{asset} can only be sent to another Vira user.')
-    if not ADDRESS_PATTERN.match(address):
-        raise WalletError('invalid_destination', "That doesn't look like a valid address.")
-    fee = _round_up(EXTERNAL_SEND_FEE_USD / simulator.price_usd(asset, at), asset)
-    return SendQuote(asset, amount, fee, None, address)
+        return SendQuote(asset, amount, Decimal(0), user, '')
+    chosen = choose_network(asset, network)
+    return SendQuote(asset, amount, network_fee(asset, chosen, at), user, address, chosen.code)
 
 
 def _locked_wallet(user, asset):
@@ -224,6 +253,7 @@ def execute_send(sender, quote):
             to_asset=quote.asset,
             to_amount=quote.amount,
             counterparty=sender,
+            network=quote.network,
         )
     return Transaction.objects.create(
         user=sender,
@@ -233,6 +263,7 @@ def execute_send(sender, quote):
         fee_amount=quote.fee_amount,
         counterparty=quote.recipient,
         address=quote.address,
+        network=quote.network,
     )
 
 
@@ -262,6 +293,17 @@ def portfolio(user, at=None):
             'value_ngn': format(value_ngn, 'f'),
         })
     return {'wallets': rows, 'total_usd': format(total_usd, 'f'), 'total_ngn': format(total_ngn, 'f')}
+
+
+def available_networks(at=None):
+    """Every asset's networks and current fees, for the send form."""
+    return {
+        asset: [
+            {'code': network.code, 'name': network.name, 'fee_amount': format(network_fee(asset, network, at), 'f')}
+            for network in networks
+        ]
+        for asset, networks in ASSET_NETWORKS.items()
+    }
 
 
 def create_starting_wallets(user):

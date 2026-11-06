@@ -53,6 +53,7 @@ def _execute(draft):
             fee_amount=Decimal(quote['fee_amount']),
             recipient=recipient,
             address=quote['address'] or '',
+            network=quote.get('network') or '',
         ))
     return services.execute_trade(draft.user, TradeQuote(
         kind=quote['kind'],

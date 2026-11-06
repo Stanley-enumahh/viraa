@@ -57,6 +57,63 @@ class RegisterTests(APITestCase):
         self.assertIn('username', response.data)
 
 
+class CustomerTests(APITestCase):
+    def setUp(self):
+        self.ada = User.objects.create_user(username='ada', email='ada@example.com', password='x', full_name='Ada Obi')
+        self.tunde = User.objects.create_user(
+            username='tunde', email='tunde@example.com', password='x', full_name='Tunde Bello',
+        )
+        self.client.force_authenticate(self.ada)
+
+    def add(self, username):
+        return self.client.post(reverse('customer-list'), {'username': username})
+
+    def test_requires_auth(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(reverse('customer-list')).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_lookup_shows_who_it_is_without_saving_or_exposing_email(self):
+        response = self.client.get(reverse('customer-lookup'), {'username': '@TUNDE'})
+        self.assertEqual(response.data, {'username': 'tunde', 'full_name': 'Tunde Bello'})
+        self.assertFalse(self.ada.customers.exists())
+
+    def test_add_list_and_remove(self):
+        added = self.add('Tunde')
+        self.assertEqual(added.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(added.data['full_name'], 'Tunde Bello')
+        self.assertNotIn('email', added.data)
+
+        self.assertEqual([row['username'] for row in self.client.get(reverse('customer-list')).data], ['tunde'])
+
+        removed = self.client.delete(reverse('customer-detail', args=[added.data['id']]))
+        self.assertEqual(removed.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(self.ada.customers.exists())
+        self.assertTrue(User.objects.filter(username='tunde').exists())
+
+    def test_refusals(self):
+        cases = [('nobody', 'unknown_user'), ('ada', 'invalid_customer')]
+        for username, code in cases:
+            with self.subTest(username=username):
+                response = self.add(username)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data['code'], code)
+        self.assertIn('sign up', self.add('nobody').data['detail'])
+
+    def test_adding_twice_is_refused(self):
+        self.add('tunde')
+        response = self.add('tunde')
+        self.assertEqual(response.data['code'], 'already_customer')
+        self.assertEqual(self.ada.customers.count(), 1)
+
+    def test_each_user_only_sees_and_removes_their_own(self):
+        customer_id = self.add('tunde').data['id']
+        self.client.force_authenticate(self.tunde)
+        self.assertEqual(self.client.get(reverse('customer-list')).data, [])
+        response = self.client.delete(reverse('customer-detail', args=[customer_id]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(self.ada.customers.count(), 1)
+
+
 class LoginTests(APITestCase):
     def setUp(self):
         self.client.post(reverse('register'), payload())

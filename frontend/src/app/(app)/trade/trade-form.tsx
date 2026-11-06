@@ -6,10 +6,10 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { DraftCard } from "@/components/assistant/draft-card";
 import { Card, ErrorNotice } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
-import type { OpenDraft } from "@/lib/assistant-controller";
+import { api } from "@/lib/api";
+import { errorMessage, openDraftFrom, type OpenDraft } from "@/lib/assistant-controller";
 import { formatAmount } from "@/lib/format";
-import type { Draft, TradeQuote, TradeRequest } from "@/lib/types";
+import type { TradeQuote, TradeRequest } from "@/lib/types";
 import { FUNDS_CHANGED_EVENT, usePolling } from "@/lib/use-polling";
 
 type Kind = TradeQuote["kind"];
@@ -35,16 +35,6 @@ function validCounter(kind: Kind, coin: string, counter: string) {
   }
   if (PAYMENT_ASSETS.includes(counter) && counter !== coin) return counter;
   return "NGN";
-}
-
-function errorText(error: unknown) {
-  return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
-}
-
-function openDraftFrom(draft: Draft): OpenDraft {
-  // Timed from when it arrived, so a wrong clock on this device can't change the countdown.
-  const lifetime = new Date(draft.expires_at).getTime() - new Date(draft.created_at).getTime();
-  return { draft, deadline: Date.now() + lifetime, phase: "open", error: "" };
 }
 
 function AssetSelect({
@@ -184,7 +174,7 @@ export function TradeForm() {
     try {
       setOpen(openDraftFrom(await api.createTradeDraft(trade)));
     } catch (caught) {
-      setError(errorText(caught));
+      setError(errorMessage(caught));
     }
     setPreparing(false);
   }
@@ -198,7 +188,7 @@ export function TradeForm() {
       setAmount("");
       window.dispatchEvent(new Event(FUNDS_CHANGED_EVENT));
     } catch (caught) {
-      setError(errorText(caught));
+      setError(errorMessage(caught));
     }
     setOpen(null);
   }
@@ -209,7 +199,7 @@ export function TradeForm() {
     try {
       await api.rejectDraft(open.draft.reference);
     } catch (caught) {
-      setError(errorText(caught));
+      setError(errorMessage(caught));
     }
     setOpen(null);
   }

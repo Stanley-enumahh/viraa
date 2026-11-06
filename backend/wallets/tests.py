@@ -134,26 +134,58 @@ class SendTests(TestCase):
     def setUp(self):
         self.ada, self.bola = make_user('ada'), make_user('bola')
 
-    def test_internal_send_is_free_and_recorded_for_both_users(self):
-        quote = services.quote_send(self.ada, 'usdt', Decimal('50'), recipient='@BOLA')
+    def test_send_to_a_user_charges_the_network_fee_and_records_both_sides(self):
+        quote = services.quote_send(self.ada, 'usdt', Decimal('50'), recipient='@BOLA', network='tron')
         tx = services.execute_send(self.ada, quote)
 
-        self.assertEqual(quote.fee_amount, Decimal(0))
-        self.assertEqual(balance(self.ada, 'USDT'), Decimal('200'))
-        self.assertEqual(balance(self.bola, 'USDT'), Decimal('300'))
-        self.assertEqual(tx.kind, 'send')
-        self.assertEqual(self.bola.transactions.get().kind, 'receive')
-
-    def test_external_send_charges_a_network_fee(self):
-        quote = services.quote_send(self.ada, 'USDT', Decimal('50'), address=ADDRESS, at=NOW)
-        tx = services.execute_send(self.ada, quote)
-
+        self.assertEqual(quote.network, 'TRC20')
         self.assertEqual(quote.fee_amount, Decimal('1'))
         self.assertEqual(balance(self.ada, 'USDT'), Decimal('199'))
+        self.assertEqual(balance(self.bola, 'USDT'), Decimal('300'))
+        self.assertEqual((tx.kind, tx.network), ('send', 'TRC20'))
+        received = self.bola.transactions.get()
+        self.assertEqual((received.kind, received.network), ('receive', 'TRC20'))
+
+    def test_each_network_has_its_own_fee(self):
+        fees = {
+            name: services.quote_send(self.ada, 'USDT', Decimal('5'), recipient='bola', network=name).fee_amount
+            for name in ['TRC-20', 'BNB Chain', 'erc20']
+        }
+        self.assertEqual(fees, {'TRC-20': Decimal('1'), 'BNB Chain': Decimal('0.30'), 'erc20': Decimal('5')})
+
+    def test_usdt_needs_a_network_choice(self):
+        with self.assertRaises(WalletError) as ctx:
+            services.quote_send(self.ada, 'USDT', Decimal('5'), recipient='bola')
+        self.assertEqual(ctx.exception.code, 'network_required')
+        self.assertIn('TRON, BNB Chain or Ethereum', ctx.exception.message)
+
+    def test_coin_with_one_network_needs_no_choice(self):
+        quote = services.quote_send(self.ada, 'SOL', Decimal('1'), recipient='bola', at=NOW)
+        self.assertEqual(quote.network, 'SOL')
+        self.assertGreater(quote.fee_amount, 0)
+
+    def test_wrong_network_for_the_coin_is_refused(self):
+        with self.assertRaises(WalletError) as ctx:
+            services.quote_send(self.ada, 'BTC', Decimal('0.001'), recipient='bola', network='TRON')
+        self.assertEqual(ctx.exception.code, 'invalid_network')
+
+    def test_naira_is_free_and_has_no_network(self):
+        quote = services.quote_send(self.ada, 'NGN', Decimal('5000'), recipient='bola', network='TRON')
+        tx = services.execute_send(self.ada, quote)
+        self.assertEqual((quote.fee_amount, quote.network), (Decimal(0), ''))
+        self.assertEqual(tx.network, '')
+        self.assertEqual(balance(self.bola, 'NGN'), Decimal('505000'))
+
+    def test_external_send_charges_a_network_fee(self):
+        quote = services.quote_send(self.ada, 'USDT', Decimal('50'), address=ADDRESS, network='BEP20', at=NOW)
+        tx = services.execute_send(self.ada, quote)
+
+        self.assertEqual(quote.fee_amount, Decimal('0.30'))
+        self.assertEqual(balance(self.ada, 'USDT'), Decimal('199.70'))
         self.assertEqual(tx.address, ADDRESS)
 
     def test_fee_counts_towards_the_balance_check(self):
-        quote = services.quote_send(self.ada, 'USDT', Decimal('250'), address=ADDRESS, at=NOW)
+        quote = services.quote_send(self.ada, 'USDT', Decimal('250'), address=ADDRESS, network='TRC20', at=NOW)
         with self.assertRaises(WalletError) as ctx:
             services.execute_send(self.ada, quote)
         self.assertEqual(ctx.exception.code, 'insufficient_funds')
@@ -251,16 +283,29 @@ class WalletApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_send_and_history_for_both_users(self, _time):
-        response = self.client.post(reverse('send'), {'asset': 'USDT', 'amount': '50', 'recipient': 'bola'})
+        response = self.client.post(
+            reverse('send'), {'asset': 'USDT', 'amount': '50', 'recipient': 'bola', 'network': 'TRC20'},
+        )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['summary'], 'Sent 50 USDT to @bola')
+        self.assertEqual(response.data['summary'], 'Sent 50 USDT to @bola on TRON')
 
         self.client.force_authenticate(self.bola)
         rows = self.client.get(reverse('transaction-list')).data
-        self.assertEqual(rows[0]['summary'], 'Received 50 USDT from @ada')
+        self.assertEqual(rows[0]['summary'], 'Received 50 USDT from @ada on TRON')
+
+    def test_networks_list_gives_fees_in_the_coin(self, _time):
+        networks = self.client.get(reverse('network-list')).data
+        self.assertEqual([network['code'] for network in networks['USDT']], ['TRC20', 'BEP20', 'ERC20'])
+        self.assertEqual(networks['USDT'][1]['fee_amount'], '0.30')
+        self.assertEqual(len(networks['SOL']), 1)
+        self.assertNotIn('NGN', networks)
 
     def test_send_quote_shows_recipient_without_their_email(self, _time):
-        response = self.client.post(reverse('send-quote'), {'asset': 'USDT', 'amount': '50', 'recipient': 'bola'})
+        response = self.client.post(
+            reverse('send-quote'), {'asset': 'USDT', 'amount': '50', 'recipient': 'bola', 'network': 'BEP20'},
+        )
+        self.assertEqual(response.data['network_name'], 'BNB Chain')
+        self.assertEqual(response.data['total'], '50.30')
         self.assertEqual(response.data['recipient_name'], 'Bola')
         self.assertNotIn('bola@example.com', str(response.data))
 

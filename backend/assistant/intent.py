@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 ACTIONS = [
     'buy', 'sell', 'swap', 'send',
     'get_price', 'get_balance', 'get_portfolio', 'get_history',
+    'add_customer', 'list_customers',
     'cancel', 'voice_approval', 'clarify', 'unsupported',
 ]
 
@@ -54,6 +55,7 @@ class Intent:
     fraction: float | None = None
     recipient: str | None = None
     address: str | None = None
+    network: str | None = None
     history_days_ago: int | None = None
     message: str | None = None
 
@@ -74,12 +76,13 @@ INTENT_SCHEMA = {
         'fraction': _nullable('number'),
         'recipient': _nullable('string'),
         'address': _nullable('string'),
+        'network': _nullable('string'),
         'history_days_ago': _nullable('integer'),
         'message': _nullable('string'),
     },
     'required': [
         'action', 'from_asset', 'to_asset', 'asset', 'amount', 'amount_asset',
-        'fraction', 'recipient', 'address', 'history_days_ago', 'message',
+        'fraction', 'recipient', 'address', 'network', 'history_days_ago', 'message',
     ],
     'additionalProperties': False,
 }
@@ -92,7 +95,9 @@ Actions:
 - buy: from_asset is what they pay with (NGN or USDT; use NGN if they don't say), to_asset is the coin.
 - sell: from_asset is the coin, to_asset is what they receive (NGN or USDT; use NGN if they don't say).
 - swap: from_asset and to_asset are both crypto. "Convert" and "change" between coins mean swap.
-- send: asset, amount, and either recipient (the name or username as spoken, without @) or address.
+- send: asset, amount, and either recipient (the name or username as spoken, without @) or address. Set network to the crypto network if they name one, such as TRON, TRC20, BNB Chain, BEP20, Ethereum or ERC20. Otherwise leave it null, and don't ask for it yourself.
+- add_customer: they want to save someone as a customer or contact. recipient is the username as spoken, without @.
+- list_customers: they want to hear who their saved customers are.
 - get_price: asset is the coin they asked about.
 - get_balance: asset is the one balance they asked about.
 - get_portfolio: their total or all their balances.
@@ -174,6 +179,7 @@ def _parse_with_claude(text, history):
         fraction=data['fraction'],
         recipient=data['recipient'],
         address=data['address'],
+        network=data['network'],
         history_days_ago=data['history_days_ago'],
         message=data['message'],
     )
@@ -224,9 +230,21 @@ def _parse_with_rules(text):
     if re.fullmatch(r'(yes|yeah|yep|ok|okay|confirm|approve|approve it|go ahead|do it)', text):
         return intent('voice_approval')
 
-    send = re.search(r'\bsend\b.*?\bto\s+@?(?P<recipient>[a-z0-9_]+)\s*$', text)
+    new_customer = re.search(r'\b(?:add|save)\s+@?(?P<username>[a-z0-9_]+)\b.*\b(?:customers?|contacts?)\b', text)
+    if new_customer:
+        return intent('add_customer', recipient=new_customer.group('username'))
+    if re.search(r'\b(customers|contacts)\b', text):
+        return intent('list_customers')
+
+    send = re.search(
+        r'\bsend\b.*?\bto\s+@?(?P<recipient>[a-z0-9_]+)(?:\s+(?:on|via|through|using)\s+(?:the\s+)?(?P<network>[a-z0-9 -]+))?\s*$',
+        text,
+    )
     if send and assets:
-        return intent('send', asset=assets[0], amount=amount, fraction=fraction, recipient=send.group('recipient'))
+        return intent(
+            'send', asset=assets[0], amount=amount, fraction=fraction,
+            recipient=send.group('recipient'), network=send.group('network'),
+        )
 
     if re.search(r'\b(buy|purchase)\b', text):
         coins = [asset for asset in assets if asset != 'NGN']

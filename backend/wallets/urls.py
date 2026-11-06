@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    NetworkListView,
     PortfolioView,
     SendQuoteView,
     SendView,
@@ -12,6 +13,7 @@ from .views import (
 
 urlpatterns = [
     path('', PortfolioView.as_view(), name='portfolio'),
+    path('networks/', NetworkListView.as_view(), name='network-list'),
     path('trades/quote/', TradeQuoteView.as_view(), name='trade-quote'),
     path('trades/', TradeView.as_view(), name='trade'),
     path('send/quote/', SendQuoteView.as_view(), name='send-quote'),

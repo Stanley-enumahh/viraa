@@ -1,12 +1,16 @@
 import type {
   AssistantResult,
   AuthResponse,
+  Customer,
   Draft,
   HistoryRange,
+  NetworkOption,
   Portfolio,
   Price,
   PriceHistory,
   PriceList,
+  SendEstimate,
+  SendRequest,
   TradeEstimate,
   TradeRequest,
   Transaction,
@@ -192,6 +196,16 @@ export const api = {
   tradeEstimate: (trade: TradeRequest) =>
     request<TradeEstimate>("/wallets/trades/quote/", { method: "POST", body: trade }),
   createTradeDraft: (trade: TradeRequest) => request<Draft>("/assistant/drafts/", { method: "POST", body: trade }),
+  networks: () => request<Record<string, NetworkOption[]>>("/wallets/networks/"),
+  sendEstimate: (send: SendRequest) => request<SendEstimate>("/wallets/send/quote/", { method: "POST", body: send }),
+  createSendDraft: (send: SendRequest) => request<Draft>("/assistant/drafts/send/", { method: "POST", body: send }),
+  customers: () => request<Customer[]>("/customers/"),
+  lookupCustomer: (username: string) =>
+    request<{ username: string; full_name: string }>(`/customers/lookup/?username=${encodeURIComponent(username)}`),
+  addCustomer: (username: string) => request<Customer>("/customers/", { method: "POST", body: { username } }),
+  removeCustomer: async (id: number) => {
+    await sendRequest(`/customers/${id}/`, { method: "DELETE" });
+  },
   draft: (reference: string) => request<Draft>(`/assistant/drafts/${reference}/`),
   approveDraft: (reference: string) =>
     request<{ reply: string; draft: Draft }>(`/assistant/drafts/${reference}/approve/`, { method: "POST" }),

@@ -20,6 +20,7 @@ function detailRows({ action, quote }: Draft): [string, string][] {
       ["Send", `${formatAmount(quote.amount)} ${quote.asset}`],
       ["To", to],
     ];
+    if (quote.network_name) rows.push(["Network", quote.network_name]);
     if (Number(quote.fee_amount) > 0) {
       rows.push(["Network fee", `${formatAmount(quote.fee_amount)} ${quote.asset}`]);
       rows.push(["Total", `${formatAmount(quote.total)} ${quote.asset}`]);

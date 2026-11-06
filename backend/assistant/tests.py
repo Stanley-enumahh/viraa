@@ -14,6 +14,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from accounts.customers import add_customer
 from wallets.models import Transaction, Wallet
 from wallets.services import WalletError, balance_of, create_starting_wallets
 
@@ -113,22 +114,60 @@ class DraftingTests(CommandTestCase):
         self.assertFalse(Draft.objects.exists())
 
     def test_send_matches_a_spoken_first_name(self):
-        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='Tunde'))
+        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='Tunde', network='TRON'))
         self.assertEqual(reply.draft.quote['recipient'], 'tunde')
+        self.assertEqual(reply.draft.quote['network'], 'TRC20')
         self.assertIn('Tunde Bello', reply.text)
+        self.assertIn('on TRON, plus a 1 USDT network fee', reply.text)
+
+    def test_send_asks_which_network_when_there_is_a_choice(self):
+        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='tunde'))
+        self.assertEqual(reply.kind, 'question')
+        self.assertIn('TRON, BNB Chain or Ethereum', reply.text)
+        self.assertFalse(Draft.objects.exists())
+
+    def test_send_picks_the_only_network_and_naira_has_none(self):
+        coin = self.run_command(make_intent('send', asset='SOL', amount='1', recipient='tunde'))
+        self.assertEqual(coin.draft.quote['network'], 'SOL')
+        naira = self.run_command(make_intent('send', asset='NGN', amount='5000', recipient='tunde'))
+        self.assertIsNone(naira.draft.quote['network'])
+        self.assertEqual(naira.text, 'Send 5,000 NGN to Tunde Bello, username tunde. Tap approve to confirm.')
+
+    def test_saved_customer_wins_over_a_stranger_with_a_similar_name(self):
+        make_user('tunde2', 'Tunde Ade')
+        self.assertEqual(self.run_command(make_intent('send', asset='NGN', amount='5', recipient='Bola')).kind, 'refused')
+        self.assertEqual(self.run_command(make_intent('send', asset='NGN', amount='5', recipient='tun')).kind, 'question')
+
+        add_customer(self.ada, 'tunde2')
+        reply = self.run_command(make_intent('send', asset='NGN', amount='5', recipient='tun'))
+        self.assertEqual(reply.draft.quote['recipient'], 'tunde2')
+
+    def test_adding_a_customer_by_voice(self):
+        reply = self.run_command(make_intent('add_customer', recipient='tunde'))
+        self.assertIn('Tunde Bello', reply.text)
+        self.assertEqual(self.ada.customers.get().user, self.tunde)
+        self.assertEqual(self.run_command(make_intent('add_customer', recipient='tunde')).kind, 'refused')
+        self.assertEqual(self.run_command(make_intent('add_customer')).kind, 'question')
+        missing = self.run_command(make_intent('add_customer', recipient='nobody'))
+        self.assertIn('sign up', missing.text)
+
+    def test_listing_customers(self):
+        self.assertIn("haven't saved", self.run_command(make_intent('list_customers')).text)
+        add_customer(self.ada, 'tunde')
+        self.assertIn('Tunde Bello', self.run_command(make_intent('list_customers')).text)
 
     def test_ambiguous_name_asks_which_one(self):
         make_user('tunde2', 'Tunde Ade')
-        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='bello tunde'))
+        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='bello tunde', network='TRC20'))
         self.assertEqual(reply.kind, 'refused')
-        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='tun'))
+        reply = self.run_command(make_intent('send', asset='USDT', amount='50', recipient='tun', network='TRC20'))
         self.assertEqual(reply.kind, 'question')
         self.assertIn('Tunde Ade', reply.text)
         self.assertIn('Tunde Bello', reply.text)
 
     def test_unknown_recipient_and_self_send_are_refused(self):
-        self.assertEqual(self.run_command(make_intent('send', asset='USDT', amount='5', recipient='nobody')).kind, 'refused')
-        self.assertEqual(self.run_command(make_intent('send', asset='USDT', amount='5', recipient='ada')).kind, 'refused')
+        self.assertEqual(self.run_command(make_intent('send', asset='NGN', amount='5', recipient='nobody')).kind, 'refused')
+        self.assertEqual(self.run_command(make_intent('send', asset='NGN', amount='5', recipient='ada')).kind, 'refused')
 
     def test_new_draft_replaces_the_open_one(self):
         first = self.run_command(buy_btc()).draft
@@ -272,14 +311,15 @@ class ApprovalTests(CommandTestCase):
         self.assertFalse(Transaction.objects.exists())
 
     def test_approving_a_send_moves_funds_to_the_recipient(self):
-        draft = self.draft(make_intent('send', asset='USDT', amount='50', recipient='tunde'))
-        drafts.approve_draft(self.ada, draft.reference)
-        self.assertEqual(balance_of(self.ada, 'USDT'), Decimal('200'))
+        draft = self.draft(make_intent('send', asset='USDT', amount='50', recipient='tunde', network='BEP20'))
+        approved = drafts.approve_draft(self.ada, draft.reference)
+        self.assertEqual(approved.transaction.network, 'BEP20')
+        self.assertEqual(balance_of(self.ada, 'USDT'), Decimal('199.70'))
         self.assertEqual(balance_of(self.tunde, 'USDT'), Decimal('300'))
 
     def test_approving_an_external_send_charges_the_quoted_fee(self):
         address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kk'
-        draft = self.draft(make_intent('send', asset='USDT', amount='50', address=address))
+        draft = self.draft(make_intent('send', asset='USDT', amount='50', address=address, network='TRC20'))
         approved = drafts.approve_draft(self.ada, draft.reference)
         self.assertEqual(approved.transaction.address, address)
         self.assertEqual(balance_of(self.ada, 'USDT'), Decimal('199'))
@@ -468,6 +508,47 @@ class ManualTradeDraftTests(APITestCase):
         self.assertEqual(Draft.objects.get(reference=first).status, 'rejected')
 
 
+class ManualSendDraftTests(APITestCase):
+    def setUp(self):
+        self.ada, self.tunde = make_user('ada'), make_user('tunde')
+        self.client.force_authenticate(self.ada)
+
+    def create(self, **overrides):
+        data = {'asset': 'USDT', 'amount': '15', 'recipient': 'tunde', 'network': 'TRC20', **overrides}
+        return self.client.post(reverse('draft-send'), data)
+
+    def test_requires_auth(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.create().status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_nothing_moves_until_approved_then_recipient_is_paid(self):
+        response = self.create()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['quote']['network_name'], 'TRON')
+        self.assertEqual(balance_of(self.ada, 'USDT'), Decimal('250'))
+
+        approved = self.client.post(reverse('draft-approve', args=[response.data['reference']]))
+
+        self.assertEqual(approved.status_code, status.HTTP_200_OK)
+        self.assertIn('on TRON', approved.data['reply'])
+        self.assertEqual(balance_of(self.ada, 'USDT'), Decimal('234'))
+        self.assertEqual(balance_of(self.tunde, 'USDT'), Decimal('265'))
+
+    def test_refusals_create_no_draft(self):
+        cases = [
+            ('network_required', {'network': ''}),
+            ('invalid_network', {'network': 'Solana'}),
+            ('insufficient_funds', {'amount': '250'}),
+            ('unknown_recipient', {'recipient': 'nobody'}),
+        ]
+        for code, overrides in cases:
+            with self.subTest(code=code):
+                response = self.create(**overrides)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data['code'], code)
+        self.assertFalse(Draft.objects.exists())
+
+
 class SpeakableTests(SimpleTestCase):
     def test_rewrites_amounts_and_assets_for_speech(self):
         cases = [
@@ -635,7 +716,7 @@ class SpeechClientTests(SimpleTestCase):
 
 CLAUDE_JSON = (
     '{"action": "buy", "from_asset": "naira", "to_asset": "Bitcoin", "asset": null, "amount": "20000", '
-    '"amount_asset": "ngn", "fraction": null, "recipient": null, "address": null, '
+    '"amount_asset": "ngn", "fraction": null, "recipient": null, "address": null, "network": null, '
     '"history_days_ago": null, "message": null}'
 )
 
@@ -717,6 +798,10 @@ class RuleParserTests(SimpleTestCase):
         self.check('sell 2 sol for usdt', action='sell', from_asset='SOL', to_asset='USDT', amount='2')
         self.check('swap 0.05 eth to sol', action='swap', from_asset='ETH', to_asset='SOL', amount='0.05')
         self.check('send 50 usdt to @Tunde', action='send', asset='USDT', amount='50', recipient='tunde')
+        self.check('send 50 usdt to tunde on tron', action='send', recipient='tunde', network='tron')
+        self.check('send 5 usdt to tunde via the bnb chain network', recipient='tunde', network='bnb chain network')
+        self.check('add tunde as a customer', action='add_customer', recipient='tunde')
+        self.check('who are my customers', action='list_customers')
         self.check("what's the price of solana?", action='get_price', asset='SOL')
         self.check('how much usdt do i have', action='get_balance', asset='USDT')
         self.check("what's my balance", action='get_portfolio')

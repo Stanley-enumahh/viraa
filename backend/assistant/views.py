@@ -7,11 +7,11 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from wallets.serializers import TradeRequestSerializer, TransactionSerializer
+from wallets.serializers import SendRequestSerializer, TradeRequestSerializer, TransactionSerializer
 from wallets.views import WalletApiView
 
 from . import drafts, speech
-from .commands import draft_manual_trade, handle_command
+from .commands import draft_manual_send, draft_manual_trade, handle_command
 from .models import Draft
 from .serializers import CommandSerializer, DraftSerializer, SpeakSerializer, VoiceSerializer
 from .speakable import speakable
@@ -120,6 +120,14 @@ class DraftListView(WalletApiView):
         serializer = TradeRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         draft = draft_manual_trade(request.user, **serializer.validated_data)
+        return Response(DraftSerializer(draft).data, status=status.HTTP_201_CREATED)
+
+
+class SendDraftView(WalletApiView):
+    def post(self, request):
+        serializer = SendRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft = draft_manual_send(request.user, **serializer.validated_data)
         return Response(DraftSerializer(draft).data, status=status.HTTP_201_CREATED)
 
 

@@ -15,9 +15,11 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
 
+from accounts.customers import add_customer
 from market import simulator
 from market.views import price_row
 from wallets import services
+from wallets.networks import network_name
 from wallets.serializers import TransactionSerializer
 from wallets.services import WalletError, format_amount
 
@@ -149,7 +151,9 @@ def _resolve_recipient(user, spoken_name):
     if exact:
         return exact.username, None
 
-    matches = list(User.objects.filter(full_name__icontains=name).exclude(pk=user.pk)[:4])
+    # Someone the user saved beats a stranger with a similar name.
+    saved = User.objects.filter(pk__in=user.customers.values('user'), full_name__icontains=name)
+    matches = list(saved[:4]) or list(User.objects.filter(full_name__icontains=name).exclude(pk=user.pk)[:4])
     if not matches:
         return None, Reply('refused', f"I can't find a Vira user called {name}.")
     if len(matches) > 1:
@@ -174,17 +178,57 @@ def _handle_send(user, intent, transcript):
         if stop:
             return stop
 
-    quote = services.quote_send(user, intent.asset, amount, recipient=username, address=intent.address or '')
+    try:
+        quote = services.quote_send(
+            user, intent.asset, amount, recipient=username, address=intent.address or '', network=intent.network or '',
+        )
+    except WalletError as exc:
+        if exc.code == 'network_required':
+            return _question(exc.message)
+        raise
     if not services.has_balance(user, quote.asset, quote.total):
         return _not_enough(user, quote.asset, quote.total)
+    return _draft_reply(user, 'send', quote, _send_summary(quote), transcript)
 
+
+def _send_summary(quote):
     sent = f'{format_amount(quote.amount)} {quote.asset}'
-    if quote.recipient:
-        summary = f'Send {sent} to {quote.recipient.full_name}, username {quote.recipient.username}.'
-    else:
-        fee = f'{format_amount(quote.fee_amount)} {quote.asset}'
-        summary = f'Send {sent} to the address ending in {quote.address[-4:]}, plus a {fee} network fee.'
-    return _draft_reply(user, 'send', quote, summary, transcript)
+    to = (
+        f'{quote.recipient.full_name}, username {quote.recipient.username},'
+        if quote.recipient
+        else f'the address ending in {quote.address[-4:]},'
+    )
+    if not quote.network:
+        return f'Send {sent} to {to.rstrip(",")}.'
+    fee = f'{format_amount(quote.fee_amount)} {quote.asset}'
+    return f'Send {sent} to {to} on {network_name(quote.network)}, plus a {fee} network fee.'
+
+
+def draft_manual_send(user, asset, amount, recipient='', address='', network=''):
+    """A send from the Customers page. It gets the same locked price and approval step as a voice request."""
+    quote = services.quote_send(user, asset, amount, recipient=recipient, address=address, network=network)
+    if not services.has_balance(user, quote.asset, quote.total):
+        have = services.balance_of(user, quote.asset)
+        raise WalletError(
+            'insufficient_funds',
+            f'You need {format_amount(quote.total)} {quote.asset} but only have {format_amount(have)}.',
+        )
+    return drafts.create_draft(user, 'send', quote, _send_summary(quote), '')
+
+
+def _handle_add_customer(user, intent):
+    if not intent.recipient:
+        return _question("What's their Vira username?")
+    customer = add_customer(user, intent.recipient)
+    return _answer(f'Done. {customer.user.full_name}, username {customer.user.username}, is now one of your customers.')
+
+
+def _handle_list_customers(user):
+    names = [customer.user.full_name for customer in user.customers.select_related('user')]
+    if not names:
+        return _answer("You haven't saved any customers yet. Say add, then their username.")
+    listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return _answer(f'Your customers are {listed}.' if len(names) > 1 else f'Your only customer is {listed}.', data=names)
 
 
 def _handle_price(intent):
@@ -274,6 +318,10 @@ def _dispatch(user, intent, transcript):
         return _handle_portfolio(user)
     if action == 'get_history':
         return _handle_history(user, intent)
+    if action == 'add_customer':
+        return _handle_add_customer(user, intent)
+    if action == 'list_customers':
+        return _handle_list_customers(user)
     if action == 'cancel':
         return _handle_cancel(user)
     if action == 'voice_approval':

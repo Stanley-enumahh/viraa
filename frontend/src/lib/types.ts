@@ -79,6 +79,30 @@ export type SendQuote = {
   recipient: string | null;
   recipient_name: string | null;
   address: string | null;
+  network: string | null;
+  network_name: string | null;
+};
+
+export type SendRequest = {
+  asset: string;
+  amount: string;
+  recipient: string;
+  network: string;
+};
+
+export type SendEstimate = SendQuote & { has_balance: boolean };
+
+export type NetworkOption = {
+  code: string;
+  name: string;
+  fee_amount: string;
+};
+
+export type Customer = {
+  id: number;
+  username: string;
+  full_name: string;
+  added_at: string;
 };
 
 export type Draft = {

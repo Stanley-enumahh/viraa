@@ -58,7 +58,13 @@ function micErrorMessage(error: unknown) {
   return "The microphone isn't available. You can type your request instead.";
 }
 
-function errorMessage(error: unknown) {
+/** Timed from when it arrived, so a wrong clock on this device can't change the countdown. */
+export function openDraftFrom(draft: Draft): OpenDraft {
+  const lifetime = new Date(draft.expires_at).getTime() - new Date(draft.created_at).getTime();
+  return { draft, deadline: Date.now() + lifetime, phase: "open", error: "" };
+}
+
+export function errorMessage(error: unknown) {
   return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
 }
 
@@ -243,6 +249,8 @@ export class AssistantController {
     if (result.type === "ignored") return;
 
     this.lastRequestWasVoice = spoken;
+    // A request can change what's on the page behind the dock, such as adding a customer.
+    window.dispatchEvent(new Event(FUNDS_CHANGED_EVENT));
     if (spoken && result.transcript && result.type !== "listening") this.addMessage("user", result.transcript);
     this.addMessage("vira", result.reply);
     this.update({ panelOpen: true, followUp: spoken && (result.type === "question" || result.type === "listening") });
@@ -256,9 +264,7 @@ export class AssistantController {
   }
 
   private showDraft(draft: Draft) {
-    // Timed from when it arrived, so a wrong clock on this device can't change the countdown.
-    const lifetime = new Date(draft.expires_at).getTime() - new Date(draft.created_at).getTime();
-    this.update({ openDraft: { draft, deadline: Date.now() + lifetime, phase: "open", error: "" } });
+    this.update({ openDraft: openDraftFrom(draft) });
   }
 
   /** The user may have cancelled the open draft by voice. */

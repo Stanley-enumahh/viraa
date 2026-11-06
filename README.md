@@ -92,6 +92,7 @@ Endpoints need an `Authorization: Bearer <access token>` header unless marked pu
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/wallets/` | Balances and portfolio value |
+| GET | `/api/wallets/networks/` | Networks and current fees for each coin |
 | POST | `/api/wallets/trades/quote/` | Price a buy, sell or swap without executing it |
 | POST | `/api/wallets/trades/` | Execute a buy, sell or swap |
 | POST | `/api/wallets/send/quote/` | Price a send without executing it |
@@ -105,11 +106,20 @@ A trade takes `kind`, `from_asset`, `to_asset` and `amount`. Add `amount_asset` 
 { "kind": "buy", "from_asset": "NGN", "to_asset": "BTC", "amount": "20000" }
 ```
 
-A send takes `asset`, `amount`, and either `recipient` or `address`:
+A send takes `asset`, `amount`, either `recipient` or `address`, and `network` for a coin with more than one:
 
 ```json
-{ "asset": "USDT", "amount": "50", "recipient": "tunde" }
+{ "asset": "USDT", "amount": "50", "recipient": "tunde", "network": "TRC20" }
 ```
+
+### Customers
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/customers/` | Your saved customers |
+| POST | `/api/customers/` | Save a Vira user by `username` |
+| GET | `/api/customers/lookup/?username=` | See whose username it is before saving |
+| DELETE | `/api/customers/<id>/` | Remove a customer |
 
 Refused requests return HTTP 400 with a message that can be shown to the user:
 
@@ -126,6 +136,7 @@ Refused requests return HTTP 400 with a message that can be shown to the user:
 | POST | `/api/assistant/speak/` | Send `text`; returns MP3 audio of Vira's reply |
 | GET | `/api/assistant/drafts/` | Recent drafts |
 | POST | `/api/assistant/drafts/` | Lock the price for a buy, sell or swap from the Trade page; takes the same fields as a trade |
+| POST | `/api/assistant/drafts/send/` | Prepare a send for approval from the Customers page; takes the same fields as a send |
 | GET | `/api/assistant/drafts/<reference>/` | One draft |
 | POST | `/api/assistant/drafts/<reference>/approve/` | Execute a draft at its locked price |
 | POST | `/api/assistant/drafts/<reference>/reject/` | Cancel a draft |
@@ -159,4 +170,5 @@ With `wake_word=true`, speech that doesn't start with "Vira" or "hey Vira" retur
 
 - New users start with 500,000 NGN, 250 USDT, 0.005 BTC, 0.1 ETH and 2 SOL.
 - Trades cost 0.5%, taken from the amount paid.
-- Sends to Vira users are free. Sends to external addresses cost the equivalent of $1.
+- Crypto sends go on a chosen network, which sets a made-up fee: USDT costs the equivalent of $1 on TRON, $0.30 on BNB Chain and $5 on Ethereum. Other coins have one network each.
+- Naira has no network. It only moves between Vira users, for free.

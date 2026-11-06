@@ -3,6 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .models import Transaction
+from .networks import network_name
 from .services import format_amount
 
 # 18 digits caps amounts at 10 billion, which keeps conversions inside Decimal's precision.
@@ -22,6 +23,7 @@ class SendRequestSerializer(serializers.Serializer):
     amount = serializers.DecimalField(**AMOUNT_FIELD_ARGS)
     recipient = serializers.CharField(max_length=151, required=False, allow_blank=True)
     address = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    network = serializers.CharField(max_length=30, required=False, allow_blank=True)
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -32,7 +34,7 @@ class TransactionSerializer(serializers.ModelSerializer):
         model = Transaction
         fields = [
             'reference', 'kind', 'summary', 'from_asset', 'from_amount', 'to_asset', 'to_amount',
-            'rate', 'fee_amount', 'counterparty', 'address', 'created_at',
+            'rate', 'fee_amount', 'counterparty', 'address', 'network', 'created_at',
         ]
         read_only_fields = fields
 
@@ -40,10 +42,11 @@ class TransactionSerializer(serializers.ModelSerializer):
         paid = f'{format_amount(tx.from_amount)} {tx.from_asset}' if tx.from_amount is not None else ''
         got = f'{format_amount(tx.to_amount)} {tx.to_asset}' if tx.to_amount is not None else ''
         party = f'@{tx.counterparty.username}' if tx.counterparty else (tx.address or 'a former user')
+        on_network = f' on {network_name(tx.network)}' if tx.network else ''
         return {
             Transaction.Kind.BUY: f'Bought {got} with {paid}',
             Transaction.Kind.SELL: f'Sold {paid} for {got}',
             Transaction.Kind.SWAP: f'Swapped {paid} to {got}',
-            Transaction.Kind.SEND: f'Sent {paid} to {party}',
-            Transaction.Kind.RECEIVE: f'Received {got} from {party}',
+            Transaction.Kind.SEND: f'Sent {paid} to {party}{on_network}',
+            Transaction.Kind.RECEIVE: f'Received {got} from {party}{on_network}',
         }[tx.kind]

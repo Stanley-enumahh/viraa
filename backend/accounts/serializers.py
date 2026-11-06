@@ -7,6 +7,8 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from wallets.services import create_starting_wallets
 
+from .models import Customer
+
 User = get_user_model()
 
 
@@ -15,6 +17,20 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'email', 'username', 'full_name', 'date_joined']
         read_only_fields = fields
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    full_name = serializers.CharField(source='user.full_name', read_only=True)
+
+    class Meta:
+        model = Customer
+        fields = ['id', 'username', 'full_name', 'added_at']
+        read_only_fields = fields
+
+
+class CustomerRequestSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=151)
 
 
 class RegisterSerializer(serializers.ModelSerializer):

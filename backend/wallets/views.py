@@ -23,6 +23,11 @@ class PortfolioView(APIView):
         return Response(services.portfolio(request.user))
 
 
+class NetworkListView(APIView):
+    def get(self, request):
+        return Response(services.available_networks())
+
+
 class TradeQuoteView(WalletApiView):
     def post(self, request):
         serializer = TradeRequestSerializer(data=request.data)

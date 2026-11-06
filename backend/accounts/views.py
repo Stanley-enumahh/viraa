@@ -4,7 +4,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
+from wallets.views import WalletApiView
+
+from .customers import add_customer, find_user
+from .serializers import (
+    CustomerRequestSerializer,
+    CustomerSerializer,
+    LoginSerializer,
+    RegisterSerializer,
+    UserSerializer,
+)
 
 
 class RegisterView(generics.GenericAPIView):
@@ -36,3 +45,28 @@ class MeView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class CustomerListView(WalletApiView):
+    def get(self, request):
+        customers = request.user.customers.select_related('user')
+        return Response(CustomerSerializer(customers, many=True).data)
+
+    def post(self, request):
+        serializer = CustomerRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        customer = add_customer(request.user, serializer.validated_data['username'])
+        return Response(CustomerSerializer(customer).data, status=status.HTTP_201_CREATED)
+
+
+class CustomerLookupView(WalletApiView):
+    """Shows whose username this is, so nobody saves the wrong person."""
+
+    def get(self, request):
+        user = find_user(request.user, request.query_params.get('username'))
+        return Response({'username': user.username, 'full_name': user.full_name})
+
+
+class CustomerDetailView(generics.DestroyAPIView):
+    def get_queryset(self):
+        return self.request.user.customers.all()
